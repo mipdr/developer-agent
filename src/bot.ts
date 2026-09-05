@@ -57,9 +57,21 @@ function readSkills(dir: string): string[] {
 }
 
 // --- commands ---
+const HELP = `*Dev agent — commands*
+
+/projects — list repos in the workspace
+/project <owner/repo | dirname> — switch to a repo (clones via gh if missing); resets the conversation
+/skills — list global + project skills the agent can use
+/context — show the active CLAUDE.md files (global + project)
+/help — this message
+
+*Usage:* pick a project with /project, then just send plain messages — each becomes a prompt to the agent. The conversation is remembered per chat until you switch project.`;
+
 bot.command('start', (ctx) =>
-  ctx.reply('Dev agent online. /projects to list repos, /project <name> to pick one, then just talk.'),
+  ctx.reply('Dev agent online. /projects to list repos, /project <name> to pick one, then just talk. /help for all commands.'),
 );
+
+bot.command('help', (ctx) => reply(ctx, HELP));
 
 bot.command('projects', (ctx) => {
   const dirs = listDirs(WORKSPACE);
