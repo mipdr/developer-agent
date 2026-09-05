@@ -1,0 +1,16 @@
+services:
+  agent:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Claude subscription OAuth creds + global CLAUDE.md + global skills.
+      # rw so the OAuth token can refresh itself.
+      - ./data/claude:/root/.claude
+      # Your repos live here; /project clones into this.
+      - ./data/workspace:/workspace
+      # chat -> session map, survives restarts.
+      - ./data/state:/data
+    environment:
+      STATE_FILE: /data/state.json
+      WORKSPACE_DIR: /workspace
