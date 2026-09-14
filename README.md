@@ -14,7 +14,7 @@ Telegram  ──►  bot.ts (grammy long-poll)  ──►  Agent SDK query()  �
 ```
 
 - One Telegram chat ↔ one persistent Claude session (resumed across messages).
-- Runs with `bypassPermissions` — the container is the sandbox, repos are git,
+- Runs as a non-root user inside the container for security, repos are git,
   and only allow-listed Telegram users can talk to it.
 - `CLAUDE.md` and skills are loaded from the filesystem via `settingSources:
   ['user','project']` (`'project'` is what makes `CLAUDE.md` load).
