@@ -10,6 +10,12 @@ RUN apt-get update \
   && apt-get update && apt-get install -y --no-install-recommends gh \
   && rm -rf /var/lib/apt/lists/*
 
+# Create a non-root user
+RUN groupadd -r claude --gid=1000 \
+  && useradd -r -g claude --uid=1000 --home-dir=/home/claude --shell=/bin/bash claude \
+  && mkdir -p /home/claude \
+  && chown -R claude:claude /home/claude
+
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
@@ -18,4 +24,11 @@ COPY . .
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# Change ownership of app directory to non-root user
+RUN chown -R claude:claude /app
+
+# Switch to non-root user
+USER claude
+
 ENTRYPOINT ["/entrypoint.sh"]
