@@ -33,6 +33,8 @@ export async function runPrompt(opts: {
     options: {
       cwd: opts.cwd,
       resume: opts.sessionId,
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
       settingSources: ['user', 'project'], // 'project' is required to load CLAUDE.md + project skills
       stderr: (data) => {
         errLines.push(data);
