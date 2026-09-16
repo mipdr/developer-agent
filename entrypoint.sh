@@ -6,4 +6,7 @@ if [ -n "$GH_TOKEN" ]; then
   gh auth setup-git 2>/dev/null || true
 fi
 
+# Start cron daemon for process cleanup cronjob
+service cron start
+
 exec npm start
