@@ -1,9 +1,9 @@
 import { Bot } from 'grammy';
-import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, existsSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import * as session from './session.js';
 import { runPrompt } from './agent.js';
 import { chunk, truncate, parseSkillDescription, summarizeTool } from './util.js';
@@ -16,6 +16,8 @@ const ALLOWED = new Set(
 );
 const WORKSPACE = process.env.WORKSPACE_DIR ?? '/workspace';
 const USER_SKILLS = join(homedir(), '.claude', 'skills');
+const WHISPER_PYTHON = '/opt/whisper-venv/bin/python3';
+const TRANSCRIBE_SCRIPT = join(process.cwd(), 'transcribe.py');
 
 function required(name: string): string {
   const v = process.env[name];
@@ -65,10 +67,10 @@ const HELP = `*Dev agent — commands*
 /context — show the active CLAUDE.md files (global + project)
 /help — this message
 
-*Usage:* pick a project with /project, then just send plain messages — each becomes a prompt to the agent. The conversation is remembered per chat until you switch project.`;
+*Usage:* pick a project with /project, then just send plain messages or voice messages (transcribed locally) — each becomes a prompt to the agent. The conversation is remembered per chat until you switch project.`;
 
 bot.command('start', (ctx) =>
-  ctx.reply('Dev agent online. /projects to list repos, /project <name> to pick one, then just talk. /help for all commands.'),
+  ctx.reply('Dev agent online. /projects to list repos, /project <name> to pick one, then just talk or send voice messages. /help for all commands.'),
 );
 
 bot.command('help', (ctx) => reply(ctx, HELP));
@@ -114,8 +116,8 @@ bot.command('context', (ctx) => {
   reply(ctx, files.map((f) => `*${f}:*\n${readFileSync(f, 'utf8')}`).join('\n\n---\n\n'));
 });
 
-// --- free text = a prompt to the agent ---
-bot.on('message:text', async (ctx) => {
+// --- helper to process prompts (shared by text + voice) ---
+async function processPrompt(ctx: any, prompt: string): Promise<void> {
   const chatId = ctx.chat.id;
   const st = session.get(chatId);
   if (!st) return void ctx.reply('Pick a project first: /projects then /project <name>.');
@@ -137,7 +139,7 @@ bot.on('message:text', async (ctx) => {
 
   try {
     const { text, sessionId, costUsd } = await runPrompt({
-      prompt: ctx.message.text,
+      prompt,
       cwd: st.cwd,
       sessionId: st.sessionId,
       events: {
@@ -155,6 +157,65 @@ bot.on('message:text', async (ctx) => {
     await reply(ctx, `❌ ${e.message ?? String(e)}`);
   } finally {
     busy.delete(chatId);
+  }
+}
+
+// --- free text = a prompt to the agent ---
+bot.on('message:text', async (ctx) => {
+  await processPrompt(ctx, ctx.message.text);
+});
+
+// --- voice/audio messages = transcribed locally then sent to agent ---
+bot.on('message:voice', async (ctx) => {
+  const st = session.get(ctx.chat.id);
+  if (!st) return void ctx.reply('Pick a project first: /projects then /project <name>.');
+
+  let tempFile: string | null = null;
+
+  try {
+    await ctx.reply('🎤 Transcribing audio locally…');
+    const file = await ctx.getFile();
+    const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`;
+
+    // Download the audio file
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to download audio file');
+
+    // Save to temp file for local transcription
+    const audioBuffer = Buffer.from(await response.arrayBuffer());
+    tempFile = join(tmpdir(), `tg-voice-${Date.now()}.ogg`);
+    writeFileSync(tempFile, audioBuffer);
+
+    // Transcribe using local faster-whisper (base model for speed/accuracy balance)
+    const { stdout, stderr } = await run(WHISPER_PYTHON, [TRANSCRIBE_SCRIPT, tempFile, 'base']);
+
+    if (stderr && stderr.trim()) {
+      console.warn('Transcription warnings:', stderr);
+    }
+
+    const transcribedText = stdout.trim();
+
+    if (!transcribedText) {
+      return void ctx.reply('⚠️ Could not transcribe audio - no speech detected.');
+    }
+
+    // Show the transcribed text
+    await ctx.reply(`📝 Transcribed: "${transcribedText}"`);
+
+    // Process the transcribed text as a prompt
+    await processPrompt(ctx, transcribedText);
+
+  } catch (e: any) {
+    await ctx.reply(`❌ Audio processing failed: ${e.message ?? String(e)}`);
+  } finally {
+    // Clean up temp file
+    if (tempFile) {
+      try {
+        unlinkSync(tempFile);
+      } catch {
+        /* ignore cleanup errors */
+      }
+    }
   }
 });
 

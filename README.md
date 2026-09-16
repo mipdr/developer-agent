@@ -27,7 +27,8 @@ Telegram  ──►  bot.ts (grammy long-poll)  ──►  Agent SDK query()  �
 | `/project <name>`  | Switch to a repo; clones `owner/repo` via `gh` if missing; resets the conversation |
 | `/skills`          | List global + current-project skills the agent can use           |
 | `/context`         | Show the active `CLAUDE.md` files (global + project)              |
-| _any other text_   | Sent to the agent as a prompt                                     |
+| _any text_         | Sent to the agent as a prompt                                     |
+| _voice message_    | Transcribed locally via faster-whisper, then sent to the agent as a prompt |
 
 ## Setup
 
@@ -50,6 +51,8 @@ Telegram  ──►  bot.ts (grammy long-poll)  ──►  Agent SDK query()  �
    ```sh
    docker compose up -d --build
    ```
+
+**Note:** Voice message transcription uses faster-whisper running locally in the container. The first time a voice message is transcribed, the Whisper model (base) will be downloaded and cached (~140MB). No external API calls or keys are required for audio transcription.
 
 Put global agent rules in `data/claude/CLAUDE.md` (e.g. "always branch, open a
 PR, never force-push main") and reusable skills in `data/claude/skills/<name>/SKILL.md`.
