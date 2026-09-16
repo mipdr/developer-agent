@@ -11,12 +11,13 @@ import { chunk, truncate, parseSkillDescription, summarizeTool } from './util.js
 const run = promisify(execFile);
 
 const TOKEN = required('TELEGRAM_BOT_TOKEN');
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY; // Optional, for audio transcription
 const ALLOWED = new Set(
   (process.env.ALLOWED_USER_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
 );
 const WORKSPACE = process.env.WORKSPACE_DIR ?? '/workspace';
 const USER_SKILLS = join(homedir(), '.claude', 'skills');
+const WHISPER_PYTHON = '/opt/whisper-venv/bin/python3';
+const TRANSCRIBE_SCRIPT = join(process.cwd(), 'transcribe.py');
 
 function required(name: string): string {
   const v = process.env[name];
@@ -66,7 +67,7 @@ const HELP = `*Dev agent — commands*
 /context — show the active CLAUDE.md files (global + project)
 /help — this message
 
-*Usage:* pick a project with /project, then just send plain messages or voice messages — each becomes a prompt to the agent. The conversation is remembered per chat until you switch project.`;
+*Usage:* pick a project with /project, then just send plain messages or voice messages (transcribed locally) — each becomes a prompt to the agent. The conversation is remembered per chat until you switch project.`;
 
 bot.command('start', (ctx) =>
   ctx.reply('Dev agent online. /projects to list repos, /project <name> to pick one, then just talk or send voice messages. /help for all commands.'),
@@ -164,19 +165,15 @@ bot.on('message:text', async (ctx) => {
   await processPrompt(ctx, ctx.message.text);
 });
 
-// --- voice/audio messages = transcribed then sent to agent ---
+// --- voice/audio messages = transcribed locally then sent to agent ---
 bot.on('message:voice', async (ctx) => {
   const st = session.get(ctx.chat.id);
   if (!st) return void ctx.reply('Pick a project first: /projects then /project <name>.');
 
-  if (!OPENAI_API_KEY) {
-    return void ctx.reply('⚠️ Audio transcription requires OPENAI_API_KEY environment variable to be set.');
-  }
-
   let tempFile: string | null = null;
 
   try {
-    await ctx.reply('🎤 Transcribing audio…');
+    await ctx.reply('🎤 Transcribing audio locally…');
     const file = await ctx.getFile();
     const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`;
 
@@ -184,32 +181,19 @@ bot.on('message:voice', async (ctx) => {
     const response = await fetch(url);
     if (!response.ok) throw new Error('Failed to download audio file');
 
-    // Save to temp file (Whisper API needs a file)
+    // Save to temp file for local transcription
     const audioBuffer = Buffer.from(await response.arrayBuffer());
     tempFile = join(tmpdir(), `tg-voice-${Date.now()}.ogg`);
     writeFileSync(tempFile, audioBuffer);
 
-    // Transcribe using OpenAI Whisper API
-    const formData = new FormData();
-    const audioBlob = new Blob([audioBuffer], { type: 'audio/ogg' });
-    formData.append('file', audioBlob, 'audio.ogg');
-    formData.append('model', 'whisper-1');
+    // Transcribe using local faster-whisper (base model for speed/accuracy balance)
+    const { stdout, stderr } = await run(WHISPER_PYTHON, [TRANSCRIBE_SCRIPT, tempFile, 'base']);
 
-    const transcribeResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: formData,
-    });
-
-    if (!transcribeResponse.ok) {
-      const error = await transcribeResponse.text();
-      throw new Error(`Transcription failed: ${error}`);
+    if (stderr && stderr.trim()) {
+      console.warn('Transcription warnings:', stderr);
     }
 
-    const transcription = await transcribeResponse.json() as { text: string };
-    const transcribedText = transcription.text.trim();
+    const transcribedText = stdout.trim();
 
     if (!transcribedText) {
       return void ctx.reply('⚠️ Could not transcribe audio - no speech detected.');

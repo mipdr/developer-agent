@@ -28,19 +28,18 @@ Telegram  ──►  bot.ts (grammy long-poll)  ──►  Agent SDK query()  �
 | `/skills`          | List global + current-project skills the agent can use           |
 | `/context`         | Show the active `CLAUDE.md` files (global + project)              |
 | _any text_         | Sent to the agent as a prompt                                     |
-| _voice message_    | Transcribed via OpenAI Whisper, then sent to the agent as a prompt |
+| _voice message_    | Transcribed locally via faster-whisper, then sent to the agent as a prompt |
 
 ## Setup
 
 1. **Bot token** — create a bot with [@BotFather], copy the token.
 2. **Your user ID** — message [@userinfobot], copy the numeric id.
 3. **GitHub token** — a PAT with `repo` scope.
-4. **OpenAI API key** (optional) — for voice message transcription; get one from [OpenAI Platform].
-5. Copy env and fill it in:
+4. Copy env and fill it in:
    ```sh
-   cp .env.example .env    # set TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, GH_TOKEN, OPENAI_API_KEY (optional)
+   cp .env.example .env    # set TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, GH_TOKEN
    ```
-6. **Seed your Claude subscription login** into the creds volume (one time):
+5. **Seed your Claude subscription login** into the creds volume (one time):
    ```sh
    mkdir -p data/claude data/workspace data/state
    # copy your existing logged-in credentials:
@@ -48,10 +47,12 @@ Telegram  ──►  bot.ts (grammy long-poll)  ──►  Agent SDK query()  �
    # (or run `npx @anthropic-ai/claude-agent-sdk` interactively once against this dir)
    ```
    The OAuth token refreshes itself; the volume is mounted read-write so it can.
-7. **Run:**
+6. **Run:**
    ```sh
    docker compose up -d --build
    ```
+
+**Note:** Voice message transcription uses faster-whisper running locally in the container. The first time a voice message is transcribed, the Whisper model (base) will be downloaded and cached (~140MB). No external API calls or keys are required for audio transcription.
 
 Put global agent rules in `data/claude/CLAUDE.md` (e.g. "always branch, open a
 PR, never force-push main") and reusable skills in `data/claude/skills/<name>/SKILL.md`.
@@ -68,4 +69,3 @@ npm run typecheck
 
 [@BotFather]: https://t.me/BotFather
 [@userinfobot]: https://t.me/userinfobot
-[OpenAI Platform]: https://platform.openai.com/api-keys
