@@ -6,7 +6,7 @@ services:
     volumes:
       # Claude subscription OAuth creds + global CLAUDE.md + global skills.
       # rw so the OAuth token can refresh itself.
-      - ./data/claude:/root/.claude
+      - ./data/claude:/home/claude/.claude
       # Your repos live here; /project clones into this.
       - ./data/workspace:/workspace
       # chat -> session map, survives restarts.
