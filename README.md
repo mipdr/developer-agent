@@ -27,6 +27,7 @@ Telegram  ──►  bot.ts (grammy long-poll)  ──►  Agent SDK query()  �
 | `/project <name>`  | Switch to a repo; clones `owner/repo` via `gh` if missing; resets the conversation |
 | `/skills`          | List global + current-project skills the agent can use           |
 | `/context`         | Show the active `CLAUDE.md` files (global + project)              |
+| `/stop`            | Stop the agent if it's currently working on a request             |
 | _any other text_   | Sent to the agent as a prompt                                     |
 
 ## Setup
