@@ -3,12 +3,15 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 export interface AgentEvents {
   /** A tool the agent is about to run (name + raw input). */
   onTool: (name: string, input: unknown) => void;
+  /** Called periodically to check if execution should be aborted. */
+  shouldAbort?: () => boolean;
 }
 
 export interface AgentResult {
   text: string;
   sessionId: string;
   costUsd: number;
+  aborted?: boolean;
 }
 
 /**
@@ -45,6 +48,12 @@ export async function runPrompt(opts: {
 
   try {
     for await (const msg of response) {
+      // Check if we should abort before processing each message
+      if (opts.events.shouldAbort?.()) {
+        console.log('runPrompt aborted by user');
+        return { text: '⚠️ Stopped by user', sessionId, costUsd, aborted: true };
+      }
+
       if (msg.type === 'system' && msg.subtype === 'init') {
         sessionId = msg.session_id;
       } else if (msg.type === 'assistant') {

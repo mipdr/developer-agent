@@ -25,6 +25,7 @@ function required(name: string): string {
 
 const bot = new Bot(TOKEN);
 const busy = new Set<number>();
+const abortFlags = new Map<number, boolean>();
 
 // --- access control: silently ignore anyone not on the allowlist ---
 bot.use(async (ctx, next) => {
@@ -63,6 +64,7 @@ const HELP = `*Dev agent — commands*
 /project <owner/repo | dirname> — switch to a repo (clones via gh if missing); resets the conversation
 /skills — list global + project skills the agent can use
 /context — show the active CLAUDE.md files (global + project)
+/stop — stop the agent if it's currently working on a request
 /help — this message
 
 *Usage:* pick a project with /project, then just send plain messages — each becomes a prompt to the agent. The conversation is remembered per chat until you switch project.`;
@@ -114,6 +116,15 @@ bot.command('context', (ctx) => {
   reply(ctx, files.map((f) => `*${f}:*\n${readFileSync(f, 'utf8')}`).join('\n\n---\n\n'));
 });
 
+bot.command('stop', (ctx) => {
+  const chatId = ctx.chat.id;
+  if (!busy.has(chatId)) {
+    return void ctx.reply('⏸️ No active request to stop.');
+  }
+  abortFlags.set(chatId, true);
+  ctx.reply('🛑 Stopping current request...');
+});
+
 // --- free text = a prompt to the agent ---
 bot.on('message:text', async (ctx) => {
   const chatId = ctx.chat.id;
@@ -121,6 +132,7 @@ bot.on('message:text', async (ctx) => {
   if (!st) return void ctx.reply('Pick a project first: /projects then /project <name>.');
   if (busy.has(chatId)) return void ctx.reply('⏳ Still working on the previous request.');
   busy.add(chatId);
+  abortFlags.set(chatId, false); // Reset abort flag
 
   const status = await ctx.reply('🤔 working…');
   const lines: string[] = [];
@@ -136,7 +148,7 @@ bot.on('message:text', async (ctx) => {
   };
 
   try {
-    const { text, sessionId, costUsd } = await runPrompt({
+    const { text, sessionId, costUsd, aborted } = await runPrompt({
       prompt: ctx.message.text,
       cwd: st.cwd,
       sessionId: st.sessionId,
@@ -145,16 +157,22 @@ bot.on('message:text', async (ctx) => {
           lines.push(summarizeTool(name, input));
           void flush();
         },
+        shouldAbort: () => abortFlags.get(chatId) === true,
       },
     });
     session.setSession(chatId, sessionId);
     await flush(true);
     await reply(ctx, text);
-    await ctx.reply(`✅ done · $${costUsd.toFixed(3)}`);
+    if (aborted) {
+      await ctx.reply(`🛑 stopped · $${costUsd.toFixed(3)}`);
+    } else {
+      await ctx.reply(`✅ done · $${costUsd.toFixed(3)}`);
+    }
   } catch (e: any) {
     await reply(ctx, `❌ ${e.message ?? String(e)}`);
   } finally {
     busy.delete(chatId);
+    abortFlags.delete(chatId);
   }
 });
 
