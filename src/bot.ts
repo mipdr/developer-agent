@@ -4,9 +4,11 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir } from 'node:os';
+import * as http from 'node:http';
 import * as session from './session.js';
 import { runPrompt } from './agent.js';
 import { chunk, truncate, parseSkillDescription, summarizeTool } from './util.js';
+import * as metrics from './metrics.js';
 
 const run = promisify(execFile);
 
@@ -16,6 +18,7 @@ const ALLOWED = new Set(
 );
 const WORKSPACE = process.env.WORKSPACE_DIR ?? '/workspace';
 const USER_SKILLS = join(homedir(), '.claude', 'skills');
+const METRICS_PORT = parseInt(process.env.METRICS_PORT ?? '9091', 10);
 
 function required(name: string): string {
   const v = process.env[name];
@@ -117,10 +120,24 @@ bot.command('context', (ctx) => {
 // --- free text = a prompt to the agent ---
 bot.on('message:text', async (ctx) => {
   const chatId = ctx.chat.id;
+  const userId = String(ctx.from?.id ?? 'unknown');
   const st = session.get(chatId);
   if (!st) return void ctx.reply('Pick a project first: /projects then /project <name>.');
   if (busy.has(chatId)) return void ctx.reply('⏳ Still working on the previous request.');
   busy.add(chatId);
+
+  // Check if it's a command (starts with /)
+  const isCommand = ctx.message.text.startsWith('/');
+  metrics.recordTelegramMessage(userId, isCommand ? 'command' : 'text');
+
+  // Commands are handled by bot.command() handlers, so only process non-commands here
+  if (isCommand) {
+    busy.delete(chatId);
+    return;
+  }
+
+  // Track active conversations
+  metrics.activeConversations.inc();
 
   const status = await ctx.reply('🤔 working…');
   const lines: string[] = [];
@@ -135,8 +152,10 @@ bot.on('message:text', async (ctx) => {
     }
   };
 
+  const projectName = metrics.getProjectName(st.cwd);
+
   try {
-    const { text, sessionId, costUsd } = await runPrompt({
+    const result = await runPrompt({
       prompt: ctx.message.text,
       cwd: st.cwd,
       sessionId: st.sessionId,
@@ -144,18 +163,62 @@ bot.on('message:text', async (ctx) => {
         onTool: (name, input) => {
           lines.push(summarizeTool(name, input));
           void flush();
+          // Record tool execution
+          metrics.recordToolExecution(projectName, userId, String(name));
         },
       },
     });
+
+    const { text, sessionId, costUsd, metrics: apiMetrics } = result;
+
     session.setSession(chatId, sessionId);
     await flush(true);
     await reply(ctx, text);
     await ctx.reply(`✅ done · $${costUsd.toFixed(3)}`);
+
+    // Record Claude API metrics
+    if (apiMetrics) {
+      metrics.recordClaudeApiMetrics({
+        project: projectName,
+        userId,
+        status: apiMetrics.status,
+        costUsd,
+        latencySeconds: apiMetrics.durationMs / 1000,
+        inputTokens: apiMetrics.inputTokens,
+        outputTokens: apiMetrics.outputTokens,
+        cacheReadTokens: apiMetrics.cacheReadTokens,
+        cacheCreationTokens: apiMetrics.cacheCreationTokens,
+        responseLength: text.length,
+        numTurns: apiMetrics.numTurns,
+      });
+    }
   } catch (e: any) {
     await reply(ctx, `❌ ${e.message ?? String(e)}`);
+
+    // Record error metric
+    metrics.claudeApiRequests.inc({ project: projectName, user_id: userId, status: 'error' });
   } finally {
     busy.delete(chatId);
+    metrics.activeConversations.dec();
   }
+});
+
+// --- metrics HTTP server ---
+const metricsServer = http.createServer(async (req, res) => {
+  if (req.url === '/metrics') {
+    res.writeHead(200, { 'Content-Type': metrics.register.contentType });
+    res.end(await metrics.register.metrics());
+  } else if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok' }));
+  } else {
+    res.writeHead(404);
+    res.end('Not Found');
+  }
+});
+
+metricsServer.listen(METRICS_PORT, () => {
+  console.log(`Metrics server listening on port ${METRICS_PORT}`);
 });
 
 bot.catch((err) => console.error('bot error', err));

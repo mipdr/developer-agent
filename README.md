@@ -64,5 +64,29 @@ npm test           # util self-check
 npm run typecheck
 ```
 
+## Metrics
+
+The agent exposes Prometheus metrics on port 9091 (configurable via `METRICS_PORT` env var).
+
+**Endpoints:**
+- `GET /metrics` — Prometheus metrics in text format
+- `GET /health` — Health check (returns `{"status": "ok"}`)
+
+**Available metrics:**
+- Claude API requests, costs, latency, token usage
+- Tool executions by type
+- Active conversations and sessions
+- Telegram message counts by type
+
+See [METRICS.md](METRICS.md) for full documentation including metric names, labels, and example Prometheus queries.
+
+**Integration with Prometheus:**
+```yaml
+scrape_configs:
+  - job_name: 'dev-agent'
+    static_configs:
+      - targets: ['dev-agent:9091']  # Use service name if on same Docker network
+```
+
 [@BotFather]: https://t.me/BotFather
 [@userinfobot]: https://t.me/userinfobot

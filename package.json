@@ -15,6 +15,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.77",
     "grammy": "^1.30.0",
+    "prom-client": "^15.1.0",
     "tsx": "^4.19.0"
   },
   "devDependencies": {

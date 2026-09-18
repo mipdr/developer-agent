@@ -3,10 +3,13 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    # Expose metrics port for Prometheus scraping (only accessible within Docker network)
+    # ports:
+    #   - "9091:9091"  # Uncomment if you want to access metrics from host
     volumes:
       # Claude subscription OAuth creds + global CLAUDE.md + global skills.
       # rw so the OAuth token can refresh itself.
-      - ./data/claude:/home/claude/.claude
+      - ./data/claude:/root/.claude
       # Your repos live here; /project clones into this.
       - ./data/workspace:/workspace
       # chat -> session map, survives restarts.
@@ -14,3 +17,4 @@ services:
     environment:
       STATE_FILE: /data/state.json
       WORKSPACE_DIR: /workspace
+      METRICS_PORT: 9091
