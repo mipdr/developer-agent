@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { sessionsActive } from './metrics.js';
 
 export interface ChatState {
   cwd: string;
@@ -7,6 +8,9 @@ export interface ChatState {
 
 const FILE = process.env.STATE_FILE ?? 'state.json';
 const state: Record<string, ChatState> = load();
+
+// Initialize sessions metric
+updateSessionsMetric();
 
 function load(): Record<string, ChatState> {
   if (!existsSync(FILE)) return {};
@@ -19,6 +23,12 @@ function load(): Record<string, ChatState> {
 
 function save(): void {
   writeFileSync(FILE, JSON.stringify(state, null, 2));
+  updateSessionsMetric();
+}
+
+function updateSessionsMetric(): void {
+  const activeSessions = Object.values(state).filter((s) => s.sessionId).length;
+  sessionsActive.set(activeSessions);
 }
 
 export function get(chatId: number): ChatState | undefined {

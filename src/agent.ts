@@ -1,4 +1,5 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 
 export interface AgentEvents {
   /** A tool the agent is about to run (name + raw input). */
@@ -9,6 +10,16 @@ export interface AgentResult {
   text: string;
   sessionId: string;
   costUsd: number;
+  metrics?: {
+    durationMs: number;
+    durationApiMs: number;
+    numTurns: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    status: 'success' | 'error';
+  };
 }
 
 /**
@@ -24,6 +35,7 @@ export async function runPrompt(opts: {
   let sessionId = opts.sessionId ?? '';
   let text = '';
   let costUsd = 0;
+  let metrics: AgentResult['metrics'] | undefined;
   // The SDK only throws "process exited with code N"; the real error goes to the
   // child's stderr. Capture it so we can log it (docker logs) and surface it.
   const errLines: string[] = [];
@@ -54,9 +66,22 @@ export async function runPrompt(opts: {
           }
         }
       } else if (msg.type === 'result') {
-        sessionId = msg.session_id;
-        costUsd = msg.total_cost_usd ?? 0;
-        text = msg.subtype === 'success' ? msg.result : `⚠️ ${msg.subtype}\n${msg.errors.join('\n')}`;
+        const resultMsg = msg as SDKResultMessage;
+        sessionId = resultMsg.session_id;
+        costUsd = resultMsg.total_cost_usd ?? 0;
+        text = resultMsg.subtype === 'success' ? resultMsg.result : `⚠️ ${resultMsg.subtype}\n${resultMsg.errors?.join('\n') || ''}`;
+
+        // Extract metrics from the result message
+        metrics = {
+          durationMs: resultMsg.duration_ms ?? 0,
+          durationApiMs: resultMsg.duration_api_ms ?? 0,
+          numTurns: resultMsg.num_turns ?? 0,
+          inputTokens: resultMsg.usage?.input_tokens ?? 0,
+          outputTokens: resultMsg.usage?.output_tokens ?? 0,
+          cacheReadTokens: resultMsg.usage?.cache_read_input_tokens ?? 0,
+          cacheCreationTokens: resultMsg.usage?.cache_creation_input_tokens ?? 0,
+          status: resultMsg.subtype === 'success' ? 'success' : 'error',
+        };
       }
     }
   } catch (e: any) {
@@ -65,5 +90,5 @@ export async function runPrompt(opts: {
     throw new Error(detail ? `${e?.message ?? e}\n\n${detail}` : String(e?.message ?? e));
   }
 
-  return { text, sessionId, costUsd };
+  return { text, sessionId, costUsd, metrics };
 }
