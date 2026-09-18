@@ -1,4 +1,4 @@
-import { Bot } from 'grammy';
+import { Bot, InlineKeyboard } from 'grammy';
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -75,7 +75,23 @@ bot.command('help', (ctx) => reply(ctx, HELP));
 
 bot.command('projects', (ctx) => {
   const dirs = listDirs(WORKSPACE);
-  reply(ctx, dirs.length ? `Projects:\n${dirs.map((d) => `• ${d}`).join('\n')}` : 'No repos yet. `/project owner/name` to clone one.');
+  if (!dirs.length) {
+    return reply(ctx, 'No repos yet. `/project owner/name` to clone one.');
+  }
+
+  // Create an inline keyboard with project buttons
+  const keyboard = new InlineKeyboard();
+
+  // Add buttons in rows (2 buttons per row for better layout)
+  dirs.forEach((dir, index) => {
+    keyboard.text(dir, `select_project:${dir}`);
+    // Add a new row after every 2 buttons, or if it's the last button
+    if ((index + 1) % 2 === 0 || index === dirs.length - 1) {
+      keyboard.row();
+    }
+  });
+
+  return ctx.reply('Select a project:', { reply_markup: keyboard });
 });
 
 bot.command('project', async (ctx) => {
@@ -112,6 +128,36 @@ bot.command('context', (ctx) => {
   );
   if (!files.length) return void ctx.reply('No CLAUDE.md loaded (global or project).');
   reply(ctx, files.map((f) => `*${f}:*\n${readFileSync(f, 'utf8')}`).join('\n\n---\n\n'));
+});
+
+// --- callback query handler for inline keyboard buttons ---
+bot.on('callback_query:data', async (ctx) => {
+  const data = ctx.callbackQuery.data;
+  const chatId = ctx.chat?.id;
+
+  if (!chatId) {
+    await ctx.answerCallbackQuery({ text: 'Unable to determine chat context' });
+    return;
+  }
+
+  // Handle project selection
+  if (data.startsWith('select_project:')) {
+    const projectName = data.replace('select_project:', '');
+    const dir = join(WORKSPACE, projectName);
+
+    if (!existsSync(dir)) {
+      await ctx.answerCallbackQuery({ text: `Project ${projectName} no longer exists` });
+      return;
+    }
+
+    session.setProject(chatId, dir);
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(`📂 Project set to ${projectName}. Conversation reset.`);
+    return;
+  }
+
+  // Unknown callback
+  await ctx.answerCallbackQuery({ text: 'Unknown action' });
 });
 
 // --- free text = a prompt to the agent ---
